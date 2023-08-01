@@ -25,7 +25,6 @@ def draw_line(img, x0, y0, x1, y1, value = 1, pstep = None):
 
 def draw_proj_box(img, x0, y0, x1, y1, value = 1, pstep = 5):
     v = np.asarray([x1, y1]) - np.asarray([x0,y0])
-    theta = np.arctan(v[0]/v[1])
     perp = np.asarray([-v[1], v[0]])/(np.sqrt(v[1]**2+v[0]**2))
     max_val = np.max(img[~np.isnan(img)])
 
@@ -63,16 +62,16 @@ def draw_proj_box(img, x0, y0, x1, y1, value = 1, pstep = 5):
     return np.asarray(conc)
 
 
-def align(inputmatrix, Nvalues, ax, ay, bx, by, ww, m, b, **kwargs):
-    slope = m
-    intercept = b
+def align(inputmatrix, Nvalues,theta, **kwargs):
+    slope = theta[5]
+    intercept = theta[6]
     #ax, ay, bx, by, ww, slope, intercept = P[0:Nvalues]
-    ww = int(ww)
+    ww = int(theta[4])
     n = Nvalues
-    ax = int(ax)
-    ay = int(ay)
-    bx = int(bx)
-    by = int(by)
+    ax = int(theta[0])
+    ay = int(theta[1])
+    bx = int(theta[2])
+    by = int(theta[3])
 
     vals = draw_proj_box(inputmatrix, ax, ay, bx, by, pstep = ww)
     steps = np.linspace(0, len(vals)-1, len(vals))
@@ -93,57 +92,49 @@ def align(inputmatrix, Nvalues, ax, ay, bx, by, ww, m, b, **kwargs):
 
     return trial_x*slope + intercept
 
-import bilby
 
-class GaussianLikelihood(bilby.core.likelihood.Likelihood):
-    def __init__(self, xobs, yobs, xerr, yerr, function):
-        """
-
-        Parameters
-        ----------
-        xobs, yobs: array_like
-            The data to analyse
-        xerr, yerr: array_like
-            The standard deviation of the noise
-        function:
-            The python function to fit to the data
-        """
-        super(GaussianLikelihood, self).__init__(dict())
-        self.xobs = xobs
-        self.yobs = yobs
-        self.yerr = yerr
-        self.xerr = xerr
-        self.function = function
-        self.nvals = len(self.yobs)
-
-    def log_likelihood(self):
-        variance = (self.xerr * self.parameters["m"]) ** 2 + self.yerr**2
-        model_y = self.function(self.xobs, self.nvals, **self.parameters)
-        residual = self.yobs - model_y
-
-        ll = -0.5 * np.sum(residual**2 / variance + np.log(variance))
-
-        return -0.5 * np.sum(residual**2 / variance + np.log(variance))
-
-
-def MCMC(x,y, uncert, params, pmin, pmax):
+def MCMC_run(x,y, uncert, params, pmin, pmax):
     
 
     names   = ["ax","ay", "bx", "by", "ww", "m", "b"]
-    priors = bilby.core.prior.PriorDict()
-    for i in range(5):
-         priors[names[i]] = bilby.prior.Uniform(minimum=pmin[i], maximum=pmax[i], name=names[i])
 
-    for i in range(2):
-        j = i+5
-        priors[names[j]] = bilby.core.prior.analytical.Gaussian(params[j], 0.1*(pmax[j]-pmin[j]))
+    def log_prior(theta):
+        ax, ay, bx, by, ww, m, b = theta
+        if pmin[0] < ax < pmax[0] and pmin[1] < ay < pmax[1] and pmin[2] < bx < pmax[2] and pmin[3] < by < pmax[3] and pmin[4] < ww < pmax[4] and pmin[5] < m < pmax[5] and pmin[6] < b < pmax[6]:
+            return 0.0
+        return -np.inf
 
-    likelihood = GaussianLikelihood(x,y,0, uncert, align)
-    sampler_kwargs = dict(priors=priors,nwalkers = 20, nsteps = 10000, outdir="emcee_maybe",sampler = "emcee")
+    def log_likelihood(theta, x, y):
+        try:
+            model = align(x, len(y), theta )
+        except IndexError:
+            model = np.inf
+        #sigma2 = yerr**2 + model**2
+        sigma2 = model**2
+        return -0.5 * np.sum((y - model) ** 2 / sigma2 + np.log(sigma2))
+    
 
-    output = bilby.run_sampler(likelihood=likelihood, label="test",**sampler_kwargs)
+    def log_probability(theta, x, y):
+        lp = log_prior(theta)
+        if not np.isfinite(lp):
+            return -np.inf
+        return lp + log_likelihood(theta, x, y)
 
-    return output
+
+    import emcee
+
+    pos = np.asarray(params) + 1e-4 * np.random.randn(15, 7)
+    nwalkers, ndim = pos.shape
+
+    filename = "tutorial.h5"
+    backend = emcee.backends.HDFBackend(filename)
+    backend.reset(nwalkers, ndim)
+    sampler = emcee.EnsembleSampler(
+        nwalkers, ndim, log_probability, args=(x, y), backend = backend
+    )
+    sampler.run_mcmc(pos, 5000, progress=True)
+
+        
 
 
     """# setting up bilby priors

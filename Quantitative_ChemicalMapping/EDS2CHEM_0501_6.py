@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 #own code:
-import MCMC as mcmc
+import MCMC_emcee as mcmc
 
 def calc_an(CaO, Na2O):
     return ((CaO/56.0774)/(CaO/56.0774+2*Na2O/61.9789))*100
@@ -23,7 +23,7 @@ plag_crysts = ['Sample501_6_r to c_plag1']
 #regions are in [x0, x1, y0, y1]
 regions = [[1600, 2200, 600, 1200]]
 #in [x0,y0, x1,y1]
-params_list = [[180., 135., 125., 180.,  5., 1., 1.]]
+params_list = [[180., 135., 125., 180.,  5., 0., 1.]]
 ##############################################
 ##############################################
 
@@ -67,10 +67,10 @@ for i in range(len(plag_crysts)):
     # minimum and maximum parameter values 
     parameter_delta = [30.,30.,30.,30.]
     pmin1 =   np.array([params1[0] - parameter_delta[0] ,params1[1] - parameter_delta[1],params1[2] - parameter_delta[2],
-                         params1[3] - parameter_delta[3],  1., -10., -10.])
+                         params1[3] - parameter_delta[3],  1., -10., 0.])
     pmax1 =   np.array([params1[0] + parameter_delta[0] ,params1[1] + parameter_delta[1],params1[2] + parameter_delta[2],
                          params1[3] + parameter_delta[3],    10., 10., 10.])
 
     an_1 = plag1.Anorthite.values / 100
-    mc3_output1 = mcmc.MCMC(xl_pca1, an_1, an_1*0.01, params = params1,
+    mc3_output1 = mcmc.MCMC_run(xl_pca1, an_1, an_1*0.01, params = params1,
                     pmin = pmin1, pmax = pmax1)

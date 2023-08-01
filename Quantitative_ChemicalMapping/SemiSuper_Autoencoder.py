@@ -1,102 +1,13 @@
 import torch
 import time
 from torch import nn
-from torch.nn.modules.activation import LeakyReLU, Sigmoid
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import numpy as np
-import math
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
 
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('BatchNorm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
+from utils import weights_init, element, SSInferenceDataset
+from VariationalLayer import VariationalLinear
 
-def element(in_channel, out_channel):
-            return [
-                nn.Linear(in_channel, out_channel),
-                nn.LayerNorm(out_channel),
-                nn.LeakyReLU(0.02),
-            ]
-
-class FeatureDataset(Dataset):
-    def __init__(self, x, labels):
-        #self.one_hot_labels = nn.functional.one_hot(torch.Tensor(labels).to(torch.int64))
-        self.final_labs = labels
-        #self.final_labs[self.final_labs>0] = 1
-        if len(x.shape)==2:
-            self.x = x
-        else:
-            self.x = x.reshape(-1, x.shape[-1]) #dataset keeps the right shape for training
-
-    def __len__(self):
-        return self.x.shape[0] 
-    
-    def __getitem__(self, n): 
-        return torch.Tensor(self.x[n]),  self.final_labs[n]
-
-class InferenceDataset(Dataset):
-    def __init__(self, x):
-        #self.one_hot_labels = nn.functional.one_hot(torch.Tensor(labels).to(torch.int64))
-        #self.final_labs = labels
-        #self.final_labs[self.final_labs>0] = 1
-        if len(x.shape)==2:
-            self.x = x
-        else:
-            self.x = x.reshape(-1, x.shape[-1]) #dataset keeps the right shape for training
-
-    def __len__(self):
-        return self.x.shape[0] 
-    
-    def __getitem__(self, n): 
-        return torch.Tensor(self.x[n])
-    
-
-class VariationalLinear(nn.Module):
-    def __init__(self, input_size, output_size, prior_mean=0.0, prior_std=1.0):
-        super(VariationalLinear, self).__init__()
-        self.input_size = input_size
-        self.output_size = output_size
-        self.prior_mean = prior_mean
-        self.prior_std = prior_std
-        
-        # Initialize variational parameters
-        self.weight_mean = nn.Parameter(torch.randn(output_size, input_size))
-        self.weight_logvar = nn.Parameter(torch.zeros(output_size, input_size))
-        self.bias_mean = nn.Parameter(torch.randn(output_size))
-        self.bias_logvar = nn.Parameter(torch.zeros(output_size))
-
-    def reparameterize(self, mean, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mean + eps * std
-
-    def forward(self, x):
-        # Sample weights and biases from the variational distribution
-        weight = self.reparameterize(self.weight_mean, self.weight_logvar)
-        bias = self.reparameterize(self.bias_mean, self.bias_logvar)
-
-        # Compute the output of the linear layer
-        output = torch.matmul(x, weight.t()) + bias.unsqueeze(0)
-
-        return output
-
-    def kl_divergence(self):
-        # Compute the KL divergence between the variational distribution
-        # and the prior distribution (assuming both are Gaussian)
-        kl_weight = 0.5 * torch.sum(
-            self.weight_logvar.exp() - self.weight_logvar + self.weight_mean.pow(2) - 1
-        )
-        kl_bias = 0.5 * torch.sum(
-            self.bias_logvar.exp() - self.bias_logvar + self.bias_mean.pow(2) - 1
-        )
-        return kl_weight + kl_bias
-    
-################################################################################################
-################################################################################################
-################################################################################################
 
 class SemiSuperAutoencoder(nn.Module):
     def __init__(self,input_dim = 6, latent_dim = 2, class_dim = 4,hidden_layer_sizes=(64, 32), type = "svi"):
@@ -176,7 +87,7 @@ class SemiSuperAutoencoder(nn.Module):
             if m.__class__.__name__.startswith('Dropout'):
                 m.train()
     
-    def inference_numpy(self, x, batch_size = 200):
+    def inference_numpy(self, x, batch_size = 200, n = 50):
         #transform real data to latent space using the trained model
         self.eval()
 
@@ -190,7 +101,7 @@ class SemiSuperAutoencoder(nn.Module):
         classes_var = []
         self.to(device)
 
-        dataset_ = InferenceDataset(x)
+        dataset_ = SSInferenceDataset(x)
         loader = DataLoader(dataset_,batch_size=batch_size,shuffle=False)
         
         with torch.no_grad():
@@ -200,7 +111,7 @@ class SemiSuperAutoencoder(nn.Module):
                 en = self.encoded(x)
                 z = self.bottleneck(en)
                 logits = []
-                for i in range(50):
+                for i in range(n):
                     logits.append(self.classifier(en).detach().cpu().numpy())
                 cl = np.mean(logits, axis = 0)
                 cl_var = np.var(logits, axis = 0)
@@ -318,3 +229,14 @@ class SemiSuperAutoencoder(nn.Module):
             training_time = time.time() - t
             
             print(f'[{epoch+1:03}/{n_epoch:03}] train_loss: {avg_loss:.6f}, time: {training_time:.2f} s')
+
+    def save_model(self, optimizer, path):
+        check_point = {'params': self.state_dict(),                            
+                    'optimizer': optimizer.state_dict()}
+        torch.save(check_point, path)
+
+    def load_model(self, optimizer=None, path=''):
+        check_point = torch.load(path)
+        self.load_state_dict(check_point['params'])
+        if optimizer is not None:
+            optimizer.load_state_dict(check_point['potimizer'])
