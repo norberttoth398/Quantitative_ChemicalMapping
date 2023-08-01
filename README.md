@@ -1,3 +1,3 @@
 ## Quantitative Chemical Mapping Repo
 
-Main branch - for use for the near complete thing once all codes are merged
+Branch for Norbert's code as it is to be sifted through
