@@ -6,8 +6,7 @@
 import torch
 import time
 from torch import nn
-from torch.nn.modules.activation import LeakyReLU, Sigmoid
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import numpy as np
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
